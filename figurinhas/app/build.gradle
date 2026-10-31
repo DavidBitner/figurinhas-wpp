@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.davidbitner.stickers'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.davidbitner.stickers"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+        manifestPlaceholders = [contentProviderAuthority: "com.davidbitner.stickers.stickercontentprovider"]
+        buildConfigField "String", "CONTENT_PROVIDER_AUTHORITY", "\"com.davidbitner.stickers.stickercontentprovider\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('stickers.keystore')
+            storePassword 'stickers123'
+            keyAlias 'stickers'
+            keyPassword 'stickers123'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.annotation:annotation:1.7.1'
+    implementation 'com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1'
+}
