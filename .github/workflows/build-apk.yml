@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+defaults:
+  run:
+    working-directory: figurinhas
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,6 +24,8 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: figurinhas
 
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
@@ -33,12 +39,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: figurinhas-apk
-          path: figurinhas.apk
+          path: figurinhas/figurinhas.apk
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Figurinhas build ${{ github.run_number }}
-          files: figurinhas.apk
+          files: figurinhas/figurinhas.apk
           make_latest: true
