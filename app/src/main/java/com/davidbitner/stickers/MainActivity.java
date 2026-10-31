@@ -1,18 +1,20 @@
 package com.davidbitner.stickers;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Intent;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.BaseAdapter;
-import android.widget.Button;
-import android.widget.CheckBox;
+import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -21,46 +23,71 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends Activity {
+    private static final int STRIP_TILES = 5;
+
     private final List<Pack> packs = new ArrayList<>();
-    private PackAdapter adapter;
-    private TextView empty;
+    private LinearLayout list;
+    private TextView stats;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        int pad = Ui.dp(this, 16);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(pad, pad, pad, pad);
+        root.setBackgroundColor(Ui.BG);
 
-        TextView title = Ui.text(this, "Figurinhas", 28, true);
-        TextView subtitle = Ui.text(this, "Crie pacotes sem borda e adicione ao WhatsApp", 14, false);
-        subtitle.setAlpha(0.7f);
-        subtitle.setPadding(0, 0, 0, Ui.dp(this, 8));
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(Ui.dp(this, 22), Ui.dp(this, 28), Ui.dp(this, 22), Ui.dp(this, 14));
 
-        empty = Ui.text(this, "Nenhum pacote ainda. Toque em \"Novo pacote\" para começar.", 15, false);
-        empty.setGravity(Gravity.CENTER);
-        empty.setPadding(0, Ui.dp(this, 48), 0, 0);
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.HORIZONTAL);
+        brand.setGravity(Gravity.CENTER_VERTICAL);
+        View dot = new View(this);
+        GradientDrawable dotShape = new GradientDrawable();
+        dotShape.setShape(GradientDrawable.OVAL);
+        dotShape.setColor(Ui.ACCENT);
+        dot.setBackground(dotShape);
+        brand.addView(dot, new LinearLayout.LayoutParams(Ui.dp(this, 8), Ui.dp(this, 8)));
+        TextView brandLabel = Ui.mono(this, "FIGURINHAS  v" + BuildConfig.VERSION_NAME, 11, Ui.ACCENT);
+        brandLabel.setPadding(Ui.dp(this, 8), 0, 0, 0);
+        brand.addView(brandLabel);
 
-        adapter = new PackAdapter();
-        ListView list = new ListView(this);
-        list.setAdapter(adapter);
-        list.setOnItemClickListener((parent, view, position, id) -> openPack(packs.get(position)));
+        TextView heading = Ui.heading(this, "Seus pacotes", 36);
+        heading.setPadding(0, Ui.dp(this, 16), 0, 0);
+        stats = Ui.mono(this, "", 11, Ui.TEXT_DIM);
+        stats.setPadding(0, Ui.dp(this, 10), 0, 0);
 
-        Button create = new Button(this);
-        create.setText("Novo pacote");
+        header.addView(brand);
+        header.addView(heading);
+        header.addView(stats);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(Ui.dp(this, 22), Ui.dp(this, 6), Ui.dp(this, 22), Ui.dp(this, 20));
+        scroll.addView(list, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        View divider = new View(this);
+        divider.setBackgroundColor(Ui.STROKE);
+
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.VERTICAL);
+        bar.setPadding(Ui.dp(this, 22), Ui.dp(this, 16), Ui.dp(this, 22), Ui.dp(this, 20));
+        TextView create = Ui.primaryButton(this, "+  NOVO PACOTE");
         create.setOnClickListener(v -> askNewPack());
+        bar.addView(create, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        root.addView(title, new LinearLayout.LayoutParams(
+        root.addView(header, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(subtitle, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(empty, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(list, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-        root.addView(create, new LinearLayout.LayoutParams(
+        root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        root.addView(bar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
     }
@@ -70,8 +97,108 @@ public class MainActivity extends Activity {
         super.onResume();
         packs.clear();
         packs.addAll(PackStore.loadAll(this));
-        empty.setVisibility(packs.isEmpty() ? View.VISIBLE : View.GONE);
-        adapter.notifyDataSetChanged();
+        render();
+    }
+
+    private void render() {
+        list.removeAllViews();
+        int total = 0;
+        for (Pack pack : packs) {
+            total += pack.items.size();
+        }
+        if (packs.isEmpty()) {
+            stats.setText("NADA POR AQUI AINDA");
+            list.addView(emptyState());
+            return;
+        }
+        stats.setText(packs.size() + (packs.size() == 1 ? " PACOTE" : " PACOTES")
+                + "  ·  " + total + (total == 1 ? " FIGURINHA" : " FIGURINHAS"));
+        for (Pack pack : packs) {
+            list.addView(packCard(pack), Ui.wide(this, 0, 12));
+        }
+    }
+
+    private View emptyState() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER_HORIZONTAL);
+        box.setPadding(Ui.dp(this, 12), Ui.dp(this, 56), Ui.dp(this, 12), 0);
+
+        FrameLayout plus = new FrameLayout(this);
+        plus.setBackground(Ui.dashed(this, Ui.withAlpha(Ui.ACCENT, 0x99), 22));
+        TextView glyph = Ui.text(this, "+", 34, Ui.ACCENT, Typeface.MONOSPACE);
+        glyph.setGravity(Gravity.CENTER);
+        plus.addView(glyph, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
+        box.addView(plus, new LinearLayout.LayoutParams(Ui.dp(this, 84), Ui.dp(this, 84)));
+
+        TextView title = Ui.title(this, "Nenhum pacote ainda", 20);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, Ui.dp(this, 24), 0, Ui.dp(this, 8));
+        TextView hint = Ui.body(this, "Crie um pacote, adicione fotos ou GIFs e envie direto para o WhatsApp, sem borda branca.", 14);
+        hint.setGravity(Gravity.CENTER);
+        hint.setLineSpacing(0f, 1.25f);
+        box.addView(title);
+        box.addView(hint);
+        return box;
+    }
+
+    private View packCard(final Pack pack) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(Ui.dp(this, 18), Ui.dp(this, 18), Ui.dp(this, 18), Ui.dp(this, 18));
+        card.setBackground(Ui.ripple(this, Ui.box(this, Ui.SURFACE, 22, Ui.STROKE, 1), 22));
+        card.setClickable(true);
+        card.setOnClickListener(v -> openPack(pack));
+
+        TextView name = Ui.title(this, pack.name, 19);
+        name.setSingleLine(true);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        card.addView(name);
+
+        LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setGravity(Gravity.CENTER_VERTICAL);
+        chips.addView(Ui.chip(this, pack.animated ? "ANIMADO" : "ESTÁTICO", pack.animated ? Ui.CYAN : Ui.TEXT_DIM));
+        int missing = Pack.MIN_STICKERS - pack.items.size();
+        TextView status = missing > 0
+                ? Ui.chip(this, "FALTAM " + missing, Ui.WARN)
+                : Ui.chip(this, "PRONTO", Ui.OK);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        statusParams.leftMargin = Ui.dp(this, 8);
+        chips.addView(status, statusParams);
+        TextView count = Ui.mono(this, pack.items.size() + " / " + Pack.MAX_STICKERS, 11, Ui.TEXT_DIM);
+        count.setPadding(Ui.dp(this, 10), 0, 0, 0);
+        chips.addView(count);
+        card.addView(chips, Ui.wide(this, 12, 14));
+
+        LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.HORIZONTAL);
+        strip.setGravity(Gravity.CENTER_VERTICAL);
+        if (pack.items.isEmpty()) {
+            TextView empty = Ui.mono(this, "VAZIO  ·  TOQUE PARA ADICIONAR", 11, Ui.TEXT_DIM);
+            empty.setPadding(Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18));
+            empty.setBackground(Ui.dashed(this, Ui.STROKE, 14));
+            strip.addView(empty);
+        } else {
+            int shown = Math.min(STRIP_TILES, pack.items.size());
+            for (int i = 0; i < shown; i++) {
+                View tile = Ui.thumbTile(this, 52, 12, PackStore.file(this, pack, pack.items.get(i).file));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(Ui.dp(this, 52), Ui.dp(this, 52));
+                lp.rightMargin = Ui.dp(this, 8);
+                strip.addView(tile, lp);
+            }
+            int extra = pack.items.size() - shown;
+            if (extra > 0) {
+                TextView more = Ui.mono(this, "+" + extra, 12, Ui.TEXT_DIM);
+                more.setGravity(Gravity.CENTER);
+                more.setBackground(Ui.box(this, Ui.SURFACE_HI, 12, Ui.STROKE, 1));
+                strip.addView(more, new LinearLayout.LayoutParams(Ui.dp(this, 52), Ui.dp(this, 52)));
+            }
+        }
+        card.addView(strip);
+        return card;
     }
 
     private void openPack(Pack pack) {
@@ -81,75 +208,111 @@ public class MainActivity extends Activity {
     }
 
     private void askNewPack() {
-        int pad = Ui.dp(this, 20);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(pad, Ui.dp(this, 8), pad, 0);
+        box.setPadding(Ui.dp(this, 22), Ui.dp(this, 24), Ui.dp(this, 22), Ui.dp(this, 18));
+
+        box.addView(Ui.title(this, "Novo pacote", 20));
+        TextView nameLabel = Ui.mono(this, "NOME", 10, Ui.TEXT_DIM);
+        nameLabel.setPadding(0, Ui.dp(this, 20), 0, Ui.dp(this, 8));
+        box.addView(nameLabel);
 
         final EditText name = new EditText(this);
-        name.setHint("Nome do pacote");
+        name.setHint("Ex.: Memes do grupo");
+        name.setHintTextColor(Ui.withAlpha(Ui.TEXT_DIM, 0xAA));
+        name.setTextColor(Ui.TEXT);
+        name.setTextSize(16);
         name.setSingleLine(true);
+        name.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        name.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 14));
+        name.setBackground(Ui.box(this, Ui.SURFACE_HI, 14, Ui.STROKE, 1));
+        box.addView(name, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        final CheckBox animated = new CheckBox(this);
-        animated.setText("Pacote animado (GIF ou vídeo)");
+        TextView typeLabel = Ui.mono(this, "TIPO", 10, Ui.TEXT_DIM);
+        typeLabel.setPadding(0, Ui.dp(this, 18), 0, Ui.dp(this, 8));
+        box.addView(typeLabel);
 
-        box.addView(name);
-        box.addView(animated);
+        final boolean[] animated = {false};
+        final TextView staticOption = Ui.mono(this, "ESTÁTICO", 12, Ui.TEXT);
+        final TextView animatedOption = Ui.mono(this, "ANIMADO", 12, Ui.TEXT);
+        final TextView explanation = Ui.body(this, "", 13);
+        LinearLayout segments = new LinearLayout(this);
+        segments.setOrientation(LinearLayout.HORIZONTAL);
+        for (TextView option : new TextView[]{staticOption, animatedOption}) {
+            option.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+            option.setGravity(Gravity.CENTER);
+            option.setPadding(0, Ui.dp(this, 14), 0, Ui.dp(this, 14));
+            option.setClickable(true);
+        }
+        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        left.rightMargin = Ui.dp(this, 5);
+        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        right.leftMargin = Ui.dp(this, 5);
+        segments.addView(staticOption, left);
+        segments.addView(animatedOption, right);
+        box.addView(segments);
+        explanation.setPadding(0, Ui.dp(this, 12), 0, Ui.dp(this, 22));
+        explanation.setLineSpacing(0f, 1.2f);
+        box.addView(explanation);
 
-        new AlertDialog.Builder(this)
-                .setTitle("Novo pacote")
-                .setView(box)
-                .setPositiveButton("Criar", (dialog, which) -> {
-                    String value = name.getText().toString().trim();
-                    if (value.isEmpty()) {
-                        value = "Meu pacote";
-                    }
-                    if (value.length() > 128) {
-                        value = value.substring(0, 128);
-                    }
-                    try {
-                        openPack(PackStore.create(this, value, animated.isChecked()));
-                    } catch (IOException e) {
-                        Toast.makeText(this, "Não consegui criar o pacote: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                    }
-                })
-                .setNegativeButton("Cancelar", null)
-                .show();
+        final Runnable paint = () -> {
+            styleSegment(staticOption, !animated[0], Ui.ACCENT);
+            styleSegment(animatedOption, animated[0], Ui.CYAN);
+            explanation.setText(animated[0]
+                    ? "GIFs e vídeos curtos, até 10 s por figurinha. Sem remoção de fundo."
+                    : "Fotos e imagens, com remoção de fundo automática.");
+        };
+        staticOption.setOnClickListener(v -> {
+            animated[0] = false;
+            paint.run();
+        });
+        animatedOption.setOnClickListener(v -> {
+            animated[0] = true;
+            paint.run();
+        });
+        paint.run();
+
+        final Dialog dialog = Ui.dialog(this, box);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        TextView cancel = Ui.secondaryButton(this, "CANCELAR");
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        TextView create = Ui.primaryButton(this, "CRIAR");
+        create.setOnClickListener(v -> {
+            String value = name.getText().toString().trim();
+            if (value.isEmpty()) {
+                value = "Meu pacote";
+            }
+            if (value.length() > 128) {
+                value = value.substring(0, 128);
+            }
+            try {
+                Pack created = PackStore.create(this, value, animated[0]);
+                dialog.dismiss();
+                openPack(created);
+            } catch (IOException e) {
+                Toast.makeText(this, "Não consegui criar o pacote: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+        row.addView(cancel, Ui.weighted(this));
+        row.addView(create, Ui.weighted(this));
+        box.addView(row);
+
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        }
+        dialog.show();
     }
 
-    private final class PackAdapter extends BaseAdapter {
-        @Override
-        public int getCount() {
-            return packs.size();
-        }
-
-        @Override
-        public Object getItem(int position) {
-            return packs.get(position);
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return position;
-        }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            Pack pack = packs.get(position);
-            int pad = Ui.dp(MainActivity.this, 12);
-            LinearLayout row = new LinearLayout(MainActivity.this);
-            row.setOrientation(LinearLayout.VERTICAL);
-            row.setPadding(0, pad, 0, pad);
-
-            TextView name = Ui.text(MainActivity.this, pack.name, 18, true);
-            String kind = pack.animated ? "animadas" : "estáticas";
-            TextView detail = Ui.text(MainActivity.this,
-                    pack.items.size() + " figurinhas " + kind, 13, false);
-            detail.setAlpha(0.7f);
-
-            row.addView(name);
-            row.addView(detail);
-            return row;
+    private void styleSegment(TextView option, boolean selected, int color) {
+        if (selected) {
+            option.setTextColor(color);
+            option.setBackground(Ui.ripple(this,
+                    Ui.box(this, Ui.withAlpha(color, 0x22), 14, Ui.withAlpha(color, 0xCC), 1), 14));
+        } else {
+            option.setTextColor(Ui.TEXT_DIM);
+            option.setBackground(Ui.ripple(this, Ui.box(this, Ui.SURFACE_HI, 14, Ui.STROKE, 1), 14));
         }
     }
 }
