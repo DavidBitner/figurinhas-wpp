@@ -2,10 +2,17 @@ package com.davidbitner.stickers;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.ClipData;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -14,17 +21,27 @@ import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
     private static final int STRIP_TILES = 5;
+    private static final int REQUEST_IMPORT = 200;
+    private static final String PREFS = "settings";
+    private static final String PREF_REMOVE_BG = "remove_bg";
 
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private Switch removeBackground;
+    private boolean importing;
     private final List<Pack> packs = new ArrayList<>();
     private LinearLayout list;
     private TextView stats;
@@ -78,10 +95,35 @@ public class MainActivity extends Activity {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.VERTICAL);
         bar.setPadding(Ui.dp(this, 22), Ui.dp(this, 16), Ui.dp(this, 22), Ui.dp(this, 20));
-        TextView create = Ui.primaryButton(this, "+  NOVO PACOTE");
-        create.setOnClickListener(v -> askNewPack());
-        bar.addView(create, new LinearLayout.LayoutParams(
+        LinearLayout option = new LinearLayout(this);
+        option.setOrientation(LinearLayout.HORIZONTAL);
+        option.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout optionTexts = new LinearLayout(this);
+        optionTexts.setOrientation(LinearLayout.VERTICAL);
+        optionTexts.addView(Ui.title(this, "Remover fundo das fotos", 14));
+        TextView optionHint = Ui.mono(this, "IA NO APARELHO  ·  SÓ ESTÁTICAS", 10, Ui.TEXT_DIM);
+        optionHint.setPadding(0, Ui.dp(this, 5), 0, 0);
+        optionTexts.addView(optionHint);
+        option.addView(optionTexts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        final SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        removeBackground = new Switch(this);
+        removeBackground.setChecked(prefs.getBoolean(PREF_REMOVE_BG, true));
+        int[][] states = {{android.R.attr.state_checked}, {}};
+        removeBackground.setThumbTintList(new ColorStateList(states, new int[]{Ui.ACCENT, Ui.TEXT_DIM}));
+        removeBackground.setTrackTintList(new ColorStateList(states,
+                new int[]{Ui.withAlpha(Ui.ACCENT, 0x66), Ui.STROKE}));
+        removeBackground.setOnCheckedChangeListener((b, checked) ->
+                prefs.edit().putBoolean(PREF_REMOVE_BG, checked).apply());
+        option.addView(removeBackground);
+        bar.addView(option, Ui.wide(this, 0, 14));
+
+        TextView importButton = Ui.primaryButton(this, "IMPORTAR FIGURINHAS");
+        importButton.setOnClickListener(v -> pickFiles());
+        bar.addView(importButton, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView create = Ui.secondaryButton(this, "+  NOVO PACOTE MANUAL");
+        create.setOnClickListener(v -> askNewPack());
+        bar.addView(create, Ui.wide(this, 10, 0));
 
         root.addView(header, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -132,10 +174,10 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
         box.addView(plus, new LinearLayout.LayoutParams(Ui.dp(this, 84), Ui.dp(this, 84)));
 
-        TextView title = Ui.title(this, "Nenhum pacote ainda", 20);
+        TextView title = Ui.title(this, "Comece importando", 20);
         title.setGravity(Gravity.CENTER);
         title.setPadding(0, Ui.dp(this, 24), 0, Ui.dp(this, 8));
-        TextView hint = Ui.body(this, "Crie um pacote, adicione fotos ou GIFs e envie direto para o WhatsApp, sem borda branca.", 14);
+        TextView hint = Ui.body(this, "Escolha fotos, GIFs e vídeos de uma vez. O app separa em pacotes estáticos e animados automaticamente.", 14);
         hint.setGravity(Gravity.CENTER);
         hint.setLineSpacing(0f, 1.25f);
         box.addView(title);
@@ -199,6 +241,122 @@ public class MainActivity extends Activity {
         }
         card.addView(strip);
         return card;
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        worker.shutdown();
+    }
+
+    private void pickFiles() {
+        if (importing) {
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+        startActivityForResult(intent, REQUEST_IMPORT);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_IMPORT || resultCode != RESULT_OK || data == null) {
+            return;
+        }
+        List<Uri> uris = new ArrayList<>();
+        ClipData clip = data.getClipData();
+        if (clip != null) {
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                uris.add(clip.getItemAt(i).getUri());
+            }
+        } else if (data.getData() != null) {
+            uris.add(data.getData());
+        }
+        if (!uris.isEmpty()) {
+            startImport(uris);
+        }
+    }
+
+    private void startImport(final List<Uri> uris) {
+        importing = true;
+        final boolean cut = removeBackground.isChecked();
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(Ui.dp(this, 22), Ui.dp(this, 24), Ui.dp(this, 22), Ui.dp(this, 22));
+        box.addView(Ui.title(this, "Importando", 20));
+        final ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(uris.size());
+        progress.setProgressTintList(ColorStateList.valueOf(Ui.ACCENT));
+        progress.setProgressBackgroundTintList(ColorStateList.valueOf(Ui.STROKE));
+        LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 4));
+        barParams.topMargin = Ui.dp(this, 20);
+        barParams.bottomMargin = Ui.dp(this, 12);
+        box.addView(progress, barParams);
+        final TextView status = Ui.mono(this, "PROCESSANDO 1 / " + uris.size() + "…", 12, Ui.TEXT_DIM);
+        status.setLineSpacing(0f, 1.25f);
+        box.addView(status);
+
+        final Dialog dialog = Ui.dialog(this, box);
+        dialog.setCancelable(false);
+        dialog.show();
+
+        worker.execute(() -> {
+            final Importer.Result result = Importer.run(this, uris, cut, (done, total) -> runOnUiThread(() -> {
+                progress.setProgress(done);
+                status.setText("PROCESSANDO " + Math.min(done + 1, total) + " / " + total + "…");
+            }));
+            runOnUiThread(() -> finishImport(dialog, box, result));
+        });
+    }
+
+    private void finishImport(Dialog dialog, LinearLayout box, Importer.Result result) {
+        importing = false;
+        if (isDestroyed()) {
+            return;
+        }
+        box.removeAllViews();
+        int total = result.staticAdded + result.animatedAdded;
+        box.addView(Ui.title(this, total > 0 ? "Importação concluída" : "Nada foi importado", 20));
+
+        SpannableStringBuilder summary = new SpannableStringBuilder();
+        if (result.staticAdded > 0) {
+            line(summary, "✓ " + result.staticAdded + " em \"" + Importer.STATIC_NAME + "\"", Ui.OK);
+        }
+        if (result.animatedAdded > 0) {
+            line(summary, "✓ " + result.animatedAdded + " em \"" + Importer.ANIMATED_NAME + "\"", Ui.CYAN);
+        }
+        for (String problem : result.problems) {
+            line(summary, "! " + problem, Ui.WARN);
+        }
+        TextView text = Ui.mono(this, summary, 12, Ui.TEXT_DIM);
+        text.setLineSpacing(0f, 1.3f);
+        text.setPadding(0, Ui.dp(this, 16), 0, Ui.dp(this, 22));
+        box.addView(text);
+
+        TextView ok = Ui.primaryButton(this, "OK");
+        ok.setOnClickListener(v -> dialog.dismiss());
+        box.addView(ok, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setCancelable(true);
+
+        packs.clear();
+        packs.addAll(PackStore.loadAll(this));
+        render();
+    }
+
+    private static void line(SpannableStringBuilder sb, String value, int color) {
+        if (sb.length() > 0) {
+            sb.append('\n');
+        }
+        int start = sb.length();
+        sb.append(value);
+        sb.setSpan(new ForegroundColorSpan(color), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 
     private void openPack(Pack pack) {
