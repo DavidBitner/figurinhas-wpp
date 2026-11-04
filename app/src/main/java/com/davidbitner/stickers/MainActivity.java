@@ -38,9 +38,11 @@ public class MainActivity extends Activity {
     private static final int REQUEST_IMPORT = 200;
     private static final String PREFS = "settings";
     private static final String PREF_REMOVE_BG = "remove_bg";
+    private static final String PREF_EDIT_FIRST = "edit_first";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private Switch removeBackground;
+    private Switch editFirst;
     private boolean importing;
     private final List<Pack> packs = new ArrayList<>();
     private LinearLayout list;
@@ -95,27 +97,8 @@ public class MainActivity extends Activity {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.VERTICAL);
         bar.setPadding(Ui.dp(this, 22), Ui.dp(this, 16), Ui.dp(this, 22), Ui.dp(this, 20));
-        LinearLayout option = new LinearLayout(this);
-        option.setOrientation(LinearLayout.HORIZONTAL);
-        option.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout optionTexts = new LinearLayout(this);
-        optionTexts.setOrientation(LinearLayout.VERTICAL);
-        optionTexts.addView(Ui.title(this, "Remover fundo das fotos", 14));
-        TextView optionHint = Ui.mono(this, "IA NO APARELHO  ·  SÓ ESTÁTICAS", 10, Ui.TEXT_DIM);
-        optionHint.setPadding(0, Ui.dp(this, 5), 0, 0);
-        optionTexts.addView(optionHint);
-        option.addView(optionTexts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        final SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        removeBackground = new Switch(this);
-        removeBackground.setChecked(prefs.getBoolean(PREF_REMOVE_BG, true));
-        int[][] states = {{android.R.attr.state_checked}, {}};
-        removeBackground.setThumbTintList(new ColorStateList(states, new int[]{Ui.ACCENT, Ui.TEXT_DIM}));
-        removeBackground.setTrackTintList(new ColorStateList(states,
-                new int[]{Ui.withAlpha(Ui.ACCENT, 0x66), Ui.STROKE}));
-        removeBackground.setOnCheckedChangeListener((b, checked) ->
-                prefs.edit().putBoolean(PREF_REMOVE_BG, checked).apply());
-        option.addView(removeBackground);
-        bar.addView(option, Ui.wide(this, 0, 14));
+        removeBackground = addOption(bar, "Remover fundo das fotos", "IA NO APARELHO  ·  SÓ ESTÁTICAS", PREF_REMOVE_BG);
+        editFirst = addOption(bar, "Editar antes de importar", "RECORTE, GIRO E ESPELHO", PREF_EDIT_FIRST);
 
         TextView importButton = Ui.primaryButton(this, "IMPORTAR FIGURINHAS");
         importButton.setOnClickListener(v -> pickFiles());
@@ -132,6 +115,29 @@ public class MainActivity extends Activity {
         root.addView(bar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
+    }
+
+    private Switch addOption(LinearLayout bar, String title, String hint, final String prefKey) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.addView(Ui.title(this, title, 14));
+        TextView sub = Ui.mono(this, hint, 10, Ui.TEXT_DIM);
+        sub.setPadding(0, Ui.dp(this, 5), 0, 0);
+        texts.addView(sub);
+        row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        final SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        Switch toggle = new Switch(this);
+        toggle.setChecked(prefs.getBoolean(prefKey, true));
+        int[][] states = {{android.R.attr.state_checked}, {}};
+        toggle.setThumbTintList(new ColorStateList(states, new int[]{Ui.ACCENT, Ui.TEXT_DIM}));
+        toggle.setTrackTintList(new ColorStateList(states, new int[]{Ui.withAlpha(Ui.ACCENT, 0x66), Ui.STROKE}));
+        toggle.setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(prefKey, checked).apply());
+        row.addView(toggle);
+        bar.addView(row, Ui.wide(this, 0, 12));
+        return toggle;
     }
 
     @Override
@@ -276,12 +282,28 @@ public class MainActivity extends Activity {
         } else if (data.getData() != null) {
             uris.add(data.getData());
         }
-        if (!uris.isEmpty()) {
-            startImport(uris);
+        if (uris.isEmpty()) {
+            return;
+        }
+        if (editFirst.isChecked()) {
+            importing = true;
+            Editor.start(this, uris, new Editor.Callback() {
+                @Override
+                public void onDone(List<Edit> edits) {
+                    startImport(uris, edits);
+                }
+
+                @Override
+                public void onCancel() {
+                    importing = false;
+                }
+            });
+        } else {
+            startImport(uris, null);
         }
     }
 
-    private void startImport(final List<Uri> uris) {
+    private void startImport(final List<Uri> uris, final List<Edit> edits) {
         importing = true;
         final boolean cut = removeBackground.isChecked();
 
@@ -307,7 +329,7 @@ public class MainActivity extends Activity {
         dialog.show();
 
         worker.execute(() -> {
-            final Importer.Result result = Importer.run(this, uris, cut, (done, total) -> runOnUiThread(() -> {
+            final Importer.Result result = Importer.run(this, uris, edits, cut, (done, total) -> runOnUiThread(() -> {
                 progress.setProgress(done);
                 status.setText("PROCESSANDO " + Math.min(done + 1, total) + " / " + total + "…");
             }));

@@ -50,7 +50,7 @@ final class Importer {
                 || path.endsWith(".webm") || path.endsWith(".mkv") || path.endsWith(".3gp");
     }
 
-    static Result run(Context c, List<Uri> uris, boolean removeBackground, Listener listener) {
+    static Result run(Context c, List<Uri> uris, List<Edit> edits, boolean removeBackground, Listener listener) {
         Result result = new Result();
         List<Pack> packs = new ArrayList<>(PackStore.loadAll(c));
         Set<Pack> touched = new LinkedHashSet<>();
@@ -60,10 +60,11 @@ final class Importer {
             listener.onProgress(i, uris.size());
             Uri uri = uris.get(i);
             boolean animated = isAnimated(c, uri);
+            Edit edit = edits != null && i < edits.size() ? edits.get(i) : null;
             try {
                 StickerProcessor.Output out = animated
-                        ? StickerProcessor.processAnimated(c, uri)
-                        : StickerProcessor.processStatic(c, uri, removeBackground);
+                        ? StickerProcessor.processAnimated(c, uri, edit)
+                        : StickerProcessor.processStatic(c, uri, removeBackground, edit);
                 Pack target = target(c, packs, created, animated);
                 String name = "s" + UUID.randomUUID().toString().replace("-", "").substring(0, 12) + ".webp";
                 try (FileOutputStream fos = new FileOutputStream(PackStore.file(c, target, name))) {

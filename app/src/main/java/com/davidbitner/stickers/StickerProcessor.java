@@ -40,8 +40,19 @@ final class StickerProcessor {
         }
     }
 
+    static Bitmap loadPreview(Context c, Uri uri) throws IOException {
+        return decodeBitmap(c, uri);
+    }
+
     static Output processStatic(Context c, Uri uri, boolean removeBackground) throws IOException {
+        return processStatic(c, uri, removeBackground, null);
+    }
+
+    static Output processStatic(Context c, Uri uri, boolean removeBackground, Edit edit) throws IOException {
         Bitmap work = decodeBitmap(c, uri);
+        if (edit != null) {
+            work = edit.apply(work);
+        }
         String warning = null;
         if (removeBackground) {
             try {
@@ -54,13 +65,17 @@ final class StickerProcessor {
     }
 
     static Output processAnimated(Context c, Uri uri) throws IOException {
+        return processAnimated(c, uri, null);
+    }
+
+    static Output processAnimated(Context c, Uri uri, Edit edit) throws IOException {
         List<Bitmap> frames = new ArrayList<>();
         String type = c.getContentResolver().getType(uri);
         int stepMs;
         if (type != null && type.startsWith("video/")) {
-            stepMs = extractVideoFrames(c, uri, frames);
+            stepMs = extractVideoFrames(c, uri, frames, edit);
         } else {
-            stepMs = extractGifFrames(c, uri, frames);
+            stepMs = extractGifFrames(c, uri, frames, edit);
         }
         return new Output(encodeAnimated(frames, stepMs), null);
     }
@@ -228,7 +243,7 @@ final class StickerProcessor {
         return step;
     }
 
-    private static int extractGifFrames(Context c, Uri uri, List<Bitmap> frames) throws IOException {
+    private static int extractGifFrames(Context c, Uri uri, List<Bitmap> frames, Edit edit) throws IOException {
         byte[] data = readAll(c, uri);
         Movie movie = Movie.decodeByteArray(data, 0, data.length);
         if (movie == null || movie.width() <= 0 || movie.height() <= 0) {
@@ -240,6 +255,23 @@ final class StickerProcessor {
         }
         int total = Math.min(duration, MAX_ANIMATION_MS);
         int step = pickStep(total);
+        if (edit != null && !edit.isIdentity()) {
+            float s = Math.min(1f, (float) DECODE_MIN_SIDE / Math.max(movie.width(), movie.height()));
+            int w = Math.max(1, Math.round(movie.width() * s));
+            int h = Math.max(1, Math.round(movie.height() * s));
+            for (int t = 0; t < total; t += step) {
+                Bitmap full = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(full);
+                canvas.scale(s, s);
+                movie.setTime(t);
+                movie.draw(canvas, 0f, 0f);
+                frames.add(fit(edit.apply(full)));
+            }
+            if (frames.size() < 2) {
+                throw new IOException("O GIF tem poucos quadros");
+            }
+            return step;
+        }
         float scale = Math.min((float) SIZE / movie.width(), (float) SIZE / movie.height());
         float dx = (SIZE - movie.width() * scale) / 2f;
         float dy = (SIZE - movie.height() * scale) / 2f;
@@ -258,7 +290,7 @@ final class StickerProcessor {
         return step;
     }
 
-    private static int extractVideoFrames(Context c, Uri uri, List<Bitmap> frames) throws IOException {
+    private static int extractVideoFrames(Context c, Uri uri, List<Bitmap> frames, Edit edit) throws IOException {
         MediaMetadataRetriever r = new MediaMetadataRetriever();
         try {
             r.setDataSource(c, uri);
@@ -272,7 +304,7 @@ final class StickerProcessor {
             for (int t = 0; t < total; t += step) {
                 Bitmap source = r.getFrameAtTime(t * 1000L, MediaMetadataRetriever.OPTION_CLOSEST);
                 if (source != null) {
-                    frames.add(fit(source));
+                    frames.add(fit(edit != null ? edit.apply(source) : source));
                 }
             }
             if (frames.size() < 2) {
